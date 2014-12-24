@@ -1,0 +1,31 @@
+flow-table-haipin
+=================
+
+*** This is work in progress ***
+
+What is flow-table-hairpin?
+---------------------------
+
+User space daemon to use the unft driver for the Linux Kernel.
+It is designed to allow Flow Table API messages to be hairpined
+back to user-space thus allowing the NDOs to be backed by
+an implementation in user-space.
+
+The Flow Table API is being developed in the flow-net-next repository
+https://github.com/jrfastab/flow-net-next/commits/master
+
+What is here?
+-------------
+
+flow-table-haripind: a daemon that uses the unft driver to
+implement the Flow Table API NDOs in user-space.
+
+What other documentation is available?
+--------------------------------------
+
+None at this time
+
+Contact
+-------
+
+Simon Horman <simon.horman@netronome.com>
