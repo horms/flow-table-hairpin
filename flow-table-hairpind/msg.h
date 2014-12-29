@@ -1,5 +1,5 @@
-#ifndef FLOW_TABLE_MSG_H
-#define FLOW_TABLE_MSG_H
+#ifndef FTHP_MSG_H
+#define FTHP_MSG_H
 
 #include <netlink/msg.h>
 

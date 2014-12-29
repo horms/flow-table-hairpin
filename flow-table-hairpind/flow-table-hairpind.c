@@ -7,6 +7,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <flow-table/msg.h>
+
 #include <netlink/genl/ctrl.h>
 #include <netlink/genl/genl.h>
 #include <netlink/handlers.h>
@@ -185,14 +187,20 @@ static int net_flow_send_async_error(struct cb_priv *priv, uint32_t cmd,
 	return NL_OK;
 }
 
-static int net_flow_get_flows_msg_handler(struct cb_priv *priv,
-					  uint64_t seq, uint32_t ifindex)
+static int net_flow_get_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
+					  struct nlattr *attr)
 {
 	int err;
 	struct nl_msg *msg;
 	struct nlattr *encap, *encap_attr, *flows;
+	int ifindex, max_prio, min_prio, table;
 
 	printf("got net flow cmd get flows: seq=%lu\n", seq);
+
+	ifindex = flow_table_get_get_flows_request(attr, &table, &max_prio,
+						   &min_prio);
+	if (ifindex < 0)
+		fthp_log_fatal("could not get 'get flows' request\n");
 
 	msg = fthp_msg_put(priv->family, NET_FLOW_HAIRPIN_CMD_ENCAP);
 
@@ -238,59 +246,16 @@ static int net_flow_get_flows_msg_handler(struct cb_priv *priv,
 	return NL_OK;
 }
 
-static struct nla_policy net_flow_hairpin_net_flow_policy[NET_FLOW_MAX+1] =
-{
-	[NET_FLOW_IDENTIFIER_TYPE]	= { .type = NLA_U32 },
-	[NET_FLOW_IDENTIFIER]		= { .type = NLA_U32 },
-	[NET_FLOW_TABLES]		= { .type = NLA_NESTED },
-	[NET_FLOW_HEADERS]		= { .type = NLA_NESTED },
-	[NET_FLOW_ACTIONS]		= { .type = NLA_NESTED },
-	[NET_FLOW_HEADER_GRAPH]		= { .type = NLA_NESTED },
-	[NET_FLOW_TABLE_GRAPH]		= { .type = NLA_NESTED },
-	[NET_FLOW_FLOWS]		= { .type = NLA_NESTED },
-	[NET_FLOW_FLOWS_ERROR]		= { .type = NLA_NESTED },
-};
-
 static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 				uint64_t seq, struct nlattr *attr)
 {
-	int err;
-	struct nlattr *attrs[NET_FLOW_MAX+1];
-	uint32_t ifindex, type;
-
-	if (!attr) {
-		fthp_log_warn("missing net flow attributes\n");
-		return NL_SKIP;
-	}
-
-	err = nla_parse_nested(attrs, NET_FLOW_MAX, attr,
-			       net_flow_hairpin_net_flow_policy);
-	if (err) {
-		fthp_log_warn("could not parse net flow attributes\n");
-		return NL_SKIP;
-	}
-
-	if (!attrs[NET_FLOW_IDENTIFIER_TYPE] || !attrs[NET_FLOW_IDENTIFIER]) {
-		fthp_log_warn("missing net flow preamble\n");
-		return NL_SKIP;
-	}
-
-	type = nla_get_u32(attrs[NET_FLOW_IDENTIFIER_TYPE]);
-	ifindex = nla_get_u32(attrs[NET_FLOW_IDENTIFIER]);
-
-	if (type != NET_FLOW_IDENTIFIER_IFINDEX) {
-		fthp_log_warn("unknown net flow identifier type (%d) in"
-			     "message\n", type);
-		return NL_SKIP;
-	}
-
 	switch (cmd) {
 	case NET_FLOW_TABLE_CMD_GET_FLOWS:
-		return net_flow_get_flows_msg_handler(priv, seq, ifindex);
+		return net_flow_get_flows_msg_handler(priv, seq, attr);
 
 	default:
-		printf("unhandled encapsulated net flow message: "
-		       "cmd=%u ifindex=%u\n", cmd, ifindex);
+		printf("unhandled encapsulated net flow message: cmd=%u\n",
+		       cmd);
 		net_flow_send_async_error(priv, cmd, seq,
 					  NET_FLOW_HAIRPIN_ENCAP_STATUS_EOPNOTSUPP);
 		break;

@@ -25,6 +25,13 @@ if (test "${have_libnl_genl_3}" = "yes"); then
 	LIBS+=" $LIBNL_GENL_3_LIBS"
 fi
 
+PKG_CHECK_MODULES(LIBFLOW_TABLE, libflow-table,
+                  [have_libflow_table=yes], [have_libflow_table=no])
+if (test "${have_libflow_table}" = "yes"); then
+	CFLAGS+=" $LIBFLOW_TABLE_CFLAGS"
+	LIBS+=" $LIBFLOW_TABLE_LIBS"
+fi
+
 # Checks for header files.
 AC_CHECK_HEADERS([stdlib.h])
 
