@@ -187,12 +187,18 @@ static int net_flow_send_async_error(struct cb_priv *priv, uint32_t cmd,
 	return NL_OK;
 }
 
+static int get_flows_cb(struct nl_msg *UNUSED(msg), void *UNUSED(data))
+{
+	// XXX: Add flows here
+	return 0;
+}
+
 static int net_flow_get_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 					  struct nlattr *attr)
 {
 	int err;
 	struct nl_msg *msg;
-	struct nlattr *encap, *encap_attr, *flows;
+	struct nlattr *encap, *encap_attr;
 	int ifindex, max_prio, min_prio, table;
 
 	printf("got net flow cmd get flows: seq=%lu\n", seq);
@@ -226,13 +232,9 @@ static int net_flow_get_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 	    nla_put_u32(msg, NET_FLOW_IDENTIFIER, ifindex))
 		fthp_log_fatal("could put netlink attribute\n");
 
-	flows = nla_nest_start(msg, NET_FLOW_FLOWS);
-	if (!flows)
-		fthp_log_fatal("could not put nested attribute\n");
+	if (flow_table_put_flows(msg, get_flows_cb, NULL))
+		fthp_log_fatal("could not put flows");
 
-	/* XXX: Add flows here */
-
-	nla_nest_end(msg, flows);
 	nla_nest_end(msg, encap_attr);
 	nla_nest_end(msg, encap);
 
