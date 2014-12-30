@@ -42,21 +42,11 @@ static void
 set_listener(struct nl_sock *sock, int family)
 {
 	struct nl_msg *msg;
-	struct nlattr *start;
 	int err;
 
-	msg = fthp_msg_put(family, NET_FLOW_HAIRPIN_CMD_SET_LISTENER);
-
-	start = nla_nest_start(msg, NET_FLOW_HAIRPIN_LISTENER);
-	if (!start)
-		fthp_log_fatal("could not put nested attribute\n");
-
-	if (nla_put_u32(msg, NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE,
-			NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE_ENCAP) ||
-	    nla_put_u32(msg, NET_FLOW_HAIRPIN_LISTENER_ATTR_PIDS, getpid()))
-		fthp_log_fatal("could put netlink attribute\n");
-
-	nla_nest_end(msg, start);
+	msg = fthp_put_msg_set_listener(family);
+	if (!msg)
+		fthp_log_fatal("could not put set listener message\n");
 
 	err = nl_send_auto(sock, msg);
 	if (err < 0)
@@ -76,19 +66,10 @@ get_listener(struct nl_sock *sock, int family)
 {
 	int err;
 	struct nl_msg *msg;
-	struct nlattr *start;
 
-	msg = fthp_msg_put(family, NET_FLOW_HAIRPIN_CMD_GET_LISTENER);
-
-	start = nla_nest_start(msg, NET_FLOW_HAIRPIN_LISTENER);
-	if (!start)
-		fthp_log_fatal("could not put nested attribute\n");
-
-	if (nla_put_u32(msg, NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE,
-			NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE_ENCAP))
-		fthp_log_fatal("could put netlink attribute\n");
-
-	nla_nest_end(msg, start);
+	msg = fthp_put_msg_get_listener(family);
+	if (!msg)
+		fthp_log_fatal("could not put get listener message\n");
 
 	err = nl_send_auto(sock, msg);
 	if (err < 0)
@@ -151,119 +132,121 @@ static int listener_msg_handler(struct nlattr *attr)
 	return NL_OK;
 }
 
-static int net_flow_send_async_error(struct cb_priv *priv, uint32_t cmd,
+static int net_flow_send_async_error(struct cb_priv *priv, uint32_t encap_cmd,
 				     uint64_t seq, uint32_t status)
 {
 	int err;
 	struct nl_msg *msg;
-	struct nlattr *start;
 
-	printf("send async error: cmd=%u seq=%lu status=%u\n", cmd, seq,
-	       status);
+	fthp_log_warn("send async error: encap_cmd=%u seq=%lu status=%u\n",
+		      encap_cmd, seq, status);
 
-	msg = fthp_msg_put(priv->family, NET_FLOW_HAIRPIN_CMD_ENCAP);
-
-	start = nla_nest_start(msg, NET_FLOW_HAIRPIN_ENCAP);
-	if (!start)
-		fthp_log_fatal("could not put nested attribute\n");
-
-	if (nla_put_u32(msg, NET_FLOW_HAIRPIN_ENCAP_CMD_TYPE,
-			NET_FLOW_HAIRPIN_ENCAP_CMD_NET_FLOW_CMD) ||
-	    nla_put_u32(msg, NET_FLOW_HAIRPIN_ENCAP_CMD,
-			cmd) ||
-	    nla_put_u32(msg, NET_FLOW_HAIRPIN_ENCAP_STATUS, status) ||
-	    nla_put_u64(msg, NET_FLOW_HAIRPIN_ENCAP_SEQ, seq))
-		fthp_log_fatal("could put netlink attribute\n");
-
-	nla_nest_end(msg, start);
+	msg = fthp_put_msg_async_error(priv->family, encap_cmd, seq, status);;
+	if (!msg) {
+		fthp_log_warn("%s: could not put async error message\n",
+			      __func__);
+		return NL_SKIP;
+	}
 
 	err = nl_send_auto(priv->sock, msg);
-	if (err < 0)
-		 fthp_log_fatal("error sending encapsupated get flows "
-				"message: %s\n", nl_geterror(err));
-
 	free(msg);
+
+	if (err < 0) {
+		 fthp_log_warn("%s: error sending encap error message: %s\n",
+			       nl_geterror(err));
+		 return NL_SKIP;
+	}
 
 	return NL_OK;
 }
 
-static int get_flows_cb(struct nl_msg *UNUSED(msg), void *UNUSED(data))
+static int encap_msg_handler__(struct cb_priv *priv,
+			       uint64_t seq, int ifindex, uint32_t encap_cmd,
+			       int (*cb)(struct nl_msg *msg, void *data),
+			       void *cb_data)
+{
+	int err;
+	struct nl_msg *msg;
+
+	msg = fthp_put_msg_encap(priv->family, seq, ifindex, encap_cmd,
+				 cb, cb_data);
+	if (!msg) {
+		fthp_log_warn("%s: error putting encap message\n", __func__);
+		return NL_SKIP;
+	}
+
+	err = nl_send_auto(priv->sock, msg);
+
+	free(msg);
+
+	if (err < 0) {
+		 fthp_log_warn("%s: error sending message: %s\n",
+			       nl_geterror(err), __func__);
+		 return NL_SKIP;
+	}
+
+	return NL_OK;
+}
+
+struct get_flows_cb_data {
+	int table;
+	int min_prio;
+	int max_prio;
+};
+
+static int get_flows_cb__(struct nl_msg *UNUSED(msg), void *UNUSED(data))
 {
 	// XXX: Add flows here
 	return 0;
 }
 
+static int get_flows_cb(struct nl_msg *msg, void *data)
+{
+	return flow_table_put_flows(msg, get_flows_cb__, data);
+}
+
 static int net_flow_get_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 					  struct nlattr *attr)
 {
-	int err;
-	struct nl_msg *msg;
-	struct nlattr *encap, *encap_attr;
-	int ifindex, max_prio, min_prio, table;
+	int ifindex;
+	struct get_flows_cb_data cb_data;
 
-	printf("got net flow cmd get flows: seq=%lu\n", seq);
+	ifindex = flow_table_get_get_flows_request(attr, &cb_data.table,
+						   &cb_data.max_prio,
+						   &cb_data.min_prio);
+	if (ifindex < 0) {
+		fthp_log_warn("could not get 'get flows' request\n");
+		return NL_SKIP;
+	}
 
-	ifindex = flow_table_get_get_flows_request(attr, &table, &max_prio,
-						   &min_prio);
-	if (ifindex < 0)
-		fthp_log_fatal("could not get 'get flows' request\n");
-
-	msg = fthp_msg_put(priv->family, NET_FLOW_HAIRPIN_CMD_ENCAP);
-
-	encap = nla_nest_start(msg, NET_FLOW_HAIRPIN_ENCAP);
-	if (!encap)
-		fthp_log_fatal("could not put nested attribute\n");
-
-	if (nla_put_u32(msg, NET_FLOW_HAIRPIN_ENCAP_CMD_TYPE,
-			NET_FLOW_HAIRPIN_ENCAP_CMD_NET_FLOW_CMD) ||
-	    nla_put_u32(msg, NET_FLOW_HAIRPIN_ENCAP_CMD,
-			NET_FLOW_TABLE_CMD_GET_FLOWS) ||
-	    nla_put_u32(msg, NET_FLOW_HAIRPIN_ENCAP_STATUS,
-			NET_FLOW_HAIRPIN_ENCAP_STATUS_OK) ||
-	    nla_put_u64(msg, NET_FLOW_HAIRPIN_ENCAP_SEQ, seq))
-		fthp_log_fatal("could put netlink attribute\n");
-
-	encap_attr = nla_nest_start(msg, NET_FLOW_HAIRPIN_ENCAP_ATTR);
-	if (!encap_attr)
-		fthp_log_fatal("could not put nested attribute\n");
-
-	if (nla_put_u32(msg, NET_FLOW_IDENTIFIER_TYPE,
-			NET_FLOW_IDENTIFIER_IFINDEX) ||
-	    nla_put_u32(msg, NET_FLOW_IDENTIFIER, ifindex))
-		fthp_log_fatal("could put netlink attribute\n");
-
-	if (flow_table_put_flows(msg, get_flows_cb, NULL))
-		fthp_log_fatal("could not put flows");
-
-	nla_nest_end(msg, encap_attr);
-	nla_nest_end(msg, encap);
-
-	err = nl_send_auto(priv->sock, msg);
-	if (err < 0)
-		 fthp_log_fatal("error sending encapsupated get flows "
-				"message: %s\n", nl_geterror(err));
-
-	free(msg);
-
-	return NL_OK;
+	return encap_msg_handler__(priv, seq, ifindex,
+				   NET_FLOW_TABLE_CMD_GET_FLOWS,
+				   get_flows_cb, &cb_data);
 }
 
 static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 				uint64_t seq, struct nlattr *attr)
 {
+	int err;
+	uint32_t err_status = NET_FLOW_HAIRPIN_ENCAP_STATUS_EINVAL;
+
 	switch (cmd) {
 	case NET_FLOW_TABLE_CMD_GET_FLOWS:
-		return net_flow_get_flows_msg_handler(priv, seq, attr);
+		err = net_flow_get_flows_msg_handler(priv, seq, attr);
+		break;
 
 	default:
-		printf("unhandled encapsulated net flow message: cmd=%u\n",
-		       cmd);
-		net_flow_send_async_error(priv, cmd, seq,
-					  NET_FLOW_HAIRPIN_ENCAP_STATUS_EOPNOTSUPP);
+		fthp_log_warn("unhandled encapsulated net flow message: "
+			      "cmd=%u\n", cmd);
+		err = NL_SKIP;
+		err_status = NET_FLOW_HAIRPIN_ENCAP_STATUS_EOPNOTSUPP;
 		break;
 	}
 
-	return NL_OK;
+	if (err != NL_OK)
+		net_flow_send_async_error(priv, cmd, seq, err_status);
+
+	return err;
 }
 
 static struct nla_policy net_flow_hairpin_encap_policy[NET_FLOW_HAIRPIN_ENCAP_MAX+1] =
