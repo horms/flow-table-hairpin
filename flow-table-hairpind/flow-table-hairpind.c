@@ -224,6 +224,29 @@ static int net_flow_get_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 				   get_flows_cb, &cb_data);
 }
 
+static int set_flows_cb(const struct net_flow_flow *UNUSED(flow),
+			void *UNUSED(data))
+{
+	printf("%s\n", __func__);
+	// XXX: Pass flows to lower layer here
+	return 0;
+}
+
+static int net_flow_set_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
+					  struct nlattr *attr)
+{
+	int ifindex;
+
+	ifindex = flow_table_get_set_flows_request(attr, set_flows_cb, NULL);
+	if (ifindex < 0) {
+		fthp_log_warn("could not get 'set flows' request\n");
+		return NL_SKIP;
+	}
+
+	return encap_msg_handler__(priv, seq, ifindex,
+				   NET_FLOW_TABLE_CMD_SET_FLOWS, NULL, NULL);
+}
+
 static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 				uint64_t seq, struct nlattr *attr)
 {
@@ -233,6 +256,10 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 	switch (cmd) {
 	case NET_FLOW_TABLE_CMD_GET_FLOWS:
 		err = net_flow_get_flows_msg_handler(priv, seq, attr);
+		break;
+
+	case NET_FLOW_TABLE_CMD_SET_FLOWS:
+		err = net_flow_set_flows_msg_handler(priv, seq, attr);
 		break;
 
 	default:
