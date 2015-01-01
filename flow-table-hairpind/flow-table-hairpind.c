@@ -18,6 +18,8 @@
 #include <linux/if_flow.h>
 #include <linux/if_flow_hairpin.h>
 
+#include "flow-table-hairpind/ftbe.h"
+#include "flow-table-hairpind/ftbe-dummy.h"
 #include "flow-table-hairpind/log.h"
 #include "flow-table-hairpind/msg.h"
 #include "flow-table-hairpind/unused.h"
@@ -194,10 +196,17 @@ struct get_flows_cb_data {
 	int max_prio;
 };
 
-static int get_flows_cb__(struct nl_msg *UNUSED(msg), void *UNUSED(data))
+static int get_flows_ftbe_cb(const struct net_flow_flow *flow, void *data)
 {
-	// XXX: Add flows here
-	return 0;
+	return flow_table_put_flow(data, flow);
+}
+
+static int get_flows_cb__(struct nl_msg *msg, void *data)
+{
+	struct get_flows_cb_data *cb_data = data;
+
+	return ftbe_get_flows(cb_data->table, cb_data->min_prio,
+			      cb_data->max_prio, get_flows_ftbe_cb, msg);
 }
 
 static int get_flows_cb(struct nl_msg *msg, void *data)
@@ -224,12 +233,9 @@ static int net_flow_get_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 				   get_flows_cb, &cb_data);
 }
 
-static int set_flows_cb(const struct net_flow_flow *UNUSED(flow),
-			void *UNUSED(data))
+static int set_flows_cb(const struct net_flow_flow *flow, void *UNUSED(data))
 {
-	printf("%s\n", __func__);
-	// XXX: Pass flows to lower layer here
-	return 0;
+	return ftbe_set_flow(flow);
 }
 
 static int net_flow_set_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
@@ -419,6 +425,10 @@ main(int argc, char **UNUSED(argv))
 	if (argc != 1)
 		usage();
 
+	if (ftbe_dummy_register())
+		fthp_log_fatal("could not register dummy flow table "
+			       "back end\n");
+
 	async_sock = nl_socket_alloc();
 	sync_sock = nl_socket_alloc();
 	if (!sync_sock || !async_sock)
@@ -497,6 +507,7 @@ main(int argc, char **UNUSED(argv))
 
 	nl_socket_free(sync_sock);
 	nl_socket_free(async_sock);
+	ftbe_unregister();
 
 	return 0;
 }
