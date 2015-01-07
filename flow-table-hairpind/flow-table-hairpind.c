@@ -243,9 +243,29 @@ static int net_flow_set_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 {
 	int ifindex;
 
-	ifindex = flow_table_get_set_flows_request(attr, set_flows_cb, NULL);
+	ifindex = flow_table_flows_request(attr, set_flows_cb, NULL);
 	if (ifindex < 0) {
 		fthp_log_warn("could not get 'set flows' request\n");
+		return NL_SKIP;
+	}
+
+	return encap_msg_handler__(priv, seq, ifindex,
+				   NET_FLOW_TABLE_CMD_SET_FLOWS, NULL, NULL);
+}
+
+static int del_flows_cb(const struct net_flow_flow *flow, void *UNUSED(data))
+{
+	return ftbe_del_flow(flow);
+}
+
+static int net_flow_del_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
+					  struct nlattr *attr)
+{
+	int ifindex;
+
+	ifindex = flow_table_flows_request(attr, del_flows_cb, NULL);
+	if (ifindex < 0) {
+		fthp_log_warn("could not get 'del flows' request\n");
 		return NL_SKIP;
 	}
 
@@ -266,6 +286,10 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 
 	case NET_FLOW_TABLE_CMD_SET_FLOWS:
 		err = net_flow_set_flows_msg_handler(priv, seq, attr);
+		break;
+
+	case NET_FLOW_TABLE_CMD_DEL_FLOWS:
+		err = net_flow_del_flows_msg_handler(priv, seq, attr);
 		break;
 
 	default:
