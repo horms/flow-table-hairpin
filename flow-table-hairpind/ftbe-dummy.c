@@ -26,9 +26,9 @@ ftbe_dummy_get_flows(int table, int min_prio, int max_prio,
 		     int (*cb)(const struct net_flow_flow *flow, void *data),
 		     void *cb_data)
 {
-	struct ftbe_dummy_flow *flow;
+	struct ftbe_dummy_flow *flow, *tmp;
 
-	list_for_each_entry(flow, &ftbe_flows, list) {
+	list_for_each_entry_safe(flow, tmp, &ftbe_flows, list) {
 		if (table != flow->flow.table_id ||
 		    (min_prio >= 0 && flow->flow.priority < min_prio) ||
 		    (max_prio >= 0 && flow->flow.priority > max_prio))
@@ -87,9 +87,9 @@ __ftbe_dummy_del_flow(struct ftbe_dummy_flow *flow)
 
 static int ftbe_dummy_del_flow(const struct net_flow_flow *flow)
 {
-	struct ftbe_dummy_flow *f;
+	struct ftbe_dummy_flow *f, *tmp;
 
-	list_for_each_entry(f, &ftbe_flows, list) {
+	list_for_each_entry_safe(f, tmp, &ftbe_flows, list) {
 		if (f->flow.table_id != flow->table_id)
 			continue;
 		if (!flow_table_field_refs_cmp(f->flow.matches, flow->matches))
