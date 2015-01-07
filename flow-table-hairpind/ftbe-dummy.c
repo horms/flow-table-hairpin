@@ -55,7 +55,8 @@ ftbe_dummy_set_flow(const struct net_flow_flow *flow)
 			fthp_log_warn("Rejecting flow with duplicate uid\n");
 			return -1;;
 		}
-		if (flow_table_field_refs_cmp(f->flow.matches, flow->matches)) {
+		if (flow_table_field_refs_are_subset(f->flow.matches,
+						     flow->matches)) {
 			fthp_log_warn("Rejecting flow with duplicate match\n");
 			return -1;;
 		}
@@ -92,7 +93,8 @@ static int ftbe_dummy_del_flow(const struct net_flow_flow *flow)
 	list_for_each_entry_safe(f, tmp, &ftbe_flows, list) {
 		if (f->flow.table_id != flow->table_id)
 			continue;
-		if (!flow_table_field_refs_cmp(f->flow.matches, flow->matches))
+		if (!flow_table_field_refs_are_subset(f->flow.matches,
+						      flow->matches))
 			continue;
 		__ftbe_dummy_del_flow(f);
 	}
