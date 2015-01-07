@@ -95,10 +95,9 @@ static int ftbe_dummy_del_flow(const struct net_flow_flow *flow)
 		if (!flow_table_field_refs_cmp(f->flow.matches, flow->matches))
 			continue;
 		__ftbe_dummy_del_flow(f);
-		return 0;
 	}
 
-	return -1;
+	return 0;
 }
 
 static void ftbe_dummy_destroy(void)
