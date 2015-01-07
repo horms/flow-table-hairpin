@@ -8,6 +8,8 @@
 
 #include <linux/if_flow.h>
 
+#include <flow-table/types.h>
+
 extern const struct ftbe_class *ftbe;
 
 struct ftbe_class {
