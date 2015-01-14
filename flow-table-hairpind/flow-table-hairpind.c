@@ -91,16 +91,16 @@ get_listener(struct nl_sock *sock, int family)
 	free(msg);
 }
 
-static struct nla_policy net_flow_hairpin_listener_policy[NET_FLOW_HAIRPIN_MAX+1] =
+static struct nla_policy net_flow_hairpin_listener_policy[NFLH_MAX+1] =
 {
-	[NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE]	= { .type = NLA_U32 },
-	[NET_FLOW_HAIRPIN_LISTENER_ATTR_PIDS]	= { .type = NLA_U32 },
+	[NFLH_LISTENER_ATTR_TYPE]	= { .type = NLA_U32 },
+	[NFLH_LISTENER_ATTR_PIDS]	= { .type = NLA_U32 },
 };
 
 static int listener_msg_handler(struct nlattr *attr)
 {
 	int err;
-	struct nlattr *attrs[NET_FLOW_HAIRPIN_LISTENER_ATTR_MAX+1];
+	struct nlattr *attrs[NFLH_LISTENER_ATTR_MAX+1];
 	uint32_t pid, type;
 
 	if (!attr) {
@@ -108,23 +108,23 @@ static int listener_msg_handler(struct nlattr *attr)
 		return NL_SKIP;
 	}
 
-	err = nla_parse_nested(attrs, NET_FLOW_HAIRPIN_LISTENER_ATTR_MAX,
+	err = nla_parse_nested(attrs, NFLH_LISTENER_ATTR_MAX,
 			       attr, net_flow_hairpin_listener_policy);
 	if (err) {
 		fthp_log_warn("could not parse listener attributes\n");
 		return NL_SKIP;
 	}
 
-	if (!attrs[NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE] ||
-	    !attrs[NET_FLOW_HAIRPIN_LISTENER_ATTR_PIDS]) {
+	if (!attrs[NFLH_LISTENER_ATTR_TYPE] ||
+	    !attrs[NFLH_LISTENER_ATTR_PIDS]) {
 		fthp_log_warn("missing listener attributes\n");
 		return NL_SKIP;
 	}
 
-	type = nla_get_u32(attrs[NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE]);
-	pid = nla_get_u32(attrs[NET_FLOW_HAIRPIN_LISTENER_ATTR_PIDS]);
+	type = nla_get_u32(attrs[NFLH_LISTENER_ATTR_TYPE]);
+	pid = nla_get_u32(attrs[NFLH_LISTENER_ATTR_PIDS]);
 
-	if (type != NET_FLOW_HAIRPIN_LISTENER_ATTR_TYPE_ENCAP) {
+	if (type != NFLH_LISTENER_ATTR_TYPE_ENCAP) {
 		fthp_log_warn("unknown listener type (%d) in message\n", type);
 		return NL_SKIP;
 	}
@@ -190,50 +190,7 @@ static int encap_msg_handler__(struct cb_priv *priv,
 	return NL_OK;
 }
 
-struct get_flows_cb_data {
-	int table;
-	int min_prio;
-	int max_prio;
-};
-
-static int get_flows_ftbe_cb(const struct net_flow_flow *flow, void *data)
-{
-	return flow_table_put_flow(data, flow);
-}
-
-static int get_flows_cb__(struct nl_msg *msg, void *data)
-{
-	struct get_flows_cb_data *cb_data = data;
-
-	return ftbe_get_flows(cb_data->table, cb_data->min_prio,
-			      cb_data->max_prio, get_flows_ftbe_cb, msg);
-}
-
-static int get_flows_cb(struct nl_msg *msg, void *data)
-{
-	return flow_table_put_flows(msg, get_flows_cb__, data);
-}
-
-static int net_flow_get_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
-					  struct nlattr *attr)
-{
-	int ifindex;
-	struct get_flows_cb_data cb_data;
-
-	ifindex = flow_table_get_get_flows_request(attr, &cb_data.table,
-						   &cb_data.max_prio,
-						   &cb_data.min_prio);
-	if (ifindex < 0) {
-		fthp_log_warn("could not get 'get flows' request\n");
-		return NL_SKIP;
-	}
-
-	return encap_msg_handler__(priv, seq, ifindex,
-				   NET_FLOW_TABLE_CMD_GET_FLOWS,
-				   get_flows_cb, &cb_data);
-}
-
-static int set_flows_cb(const struct net_flow_flow *flow, void *UNUSED(data))
+static int set_flows_cb(const struct net_flow_rule *flow, void *UNUSED(data))
 {
 	return ftbe_set_flow(flow);
 }
@@ -250,12 +207,12 @@ static int net_flow_set_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 	}
 
 	return encap_msg_handler__(priv, seq, ifindex,
-				   NET_FLOW_TABLE_CMD_SET_FLOWS, NULL, NULL);
+				   NFL_TABLE_CMD_SET_FLOWS, NULL, NULL);
 }
 
-static int del_flows_cb(const struct net_flow_flow *flow, void *UNUSED(data))
+static int del_flows_cb(const struct net_flow_rule *rule, void *UNUSED(data))
 {
-	return ftbe_del_flow(flow);
+	return ftbe_del_flow(rule);
 }
 
 static int net_flow_del_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
@@ -270,25 +227,21 @@ static int net_flow_del_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 	}
 
 	return encap_msg_handler__(priv, seq, ifindex,
-				   NET_FLOW_TABLE_CMD_SET_FLOWS, NULL, NULL);
+				   NFL_TABLE_CMD_SET_FLOWS, NULL, NULL);
 }
 
 static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 				uint64_t seq, struct nlattr *attr)
 {
 	int err;
-	uint32_t err_status = NET_FLOW_HAIRPIN_ENCAP_STATUS_EINVAL;
+	uint32_t err_status = NFLH_ENCAP_STATUS_EINVAL;
 
 	switch (cmd) {
-	case NET_FLOW_TABLE_CMD_GET_FLOWS:
-		err = net_flow_get_flows_msg_handler(priv, seq, attr);
-		break;
-
-	case NET_FLOW_TABLE_CMD_SET_FLOWS:
+	case NFL_TABLE_CMD_SET_FLOWS:
 		err = net_flow_set_flows_msg_handler(priv, seq, attr);
 		break;
 
-	case NET_FLOW_TABLE_CMD_DEL_FLOWS:
+	case NFL_TABLE_CMD_DEL_FLOWS:
 		err = net_flow_del_flows_msg_handler(priv, seq, attr);
 		break;
 
@@ -296,7 +249,7 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 		fthp_log_warn("unhandled encapsulated net flow message: "
 			      "cmd=%u\n", cmd);
 		err = NL_SKIP;
-		err_status = NET_FLOW_HAIRPIN_ENCAP_STATUS_EOPNOTSUPP;
+		err_status = NFLH_ENCAP_STATUS_EOPNOTSUPP;
 		break;
 	}
 
@@ -306,19 +259,19 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 	return err;
 }
 
-static struct nla_policy net_flow_hairpin_encap_policy[NET_FLOW_HAIRPIN_ENCAP_MAX+1] =
+static struct nla_policy net_flow_hairpin_encap_policy[NFLH_ENCAP_MAX+1] =
 {
-	[NET_FLOW_HAIRPIN_ENCAP_CMD_TYPE]	= { .type = NLA_U32 },
-	[NET_FLOW_HAIRPIN_ENCAP_CMD]		= { .type = NLA_U32 },
-	[NET_FLOW_HAIRPIN_ENCAP_STATUS]		= { .type = NLA_U32 },
-	[NET_FLOW_HAIRPIN_ENCAP_SEQ]		= { .type = NLA_U64 },
-	[NET_FLOW_HAIRPIN_ENCAP_ATTR]		= { .type = NLA_NESTED },
+	[NFLH_ENCAP_CMD_TYPE]	= { .type = NLA_U32 },
+	[NFLH_ENCAP_CMD]		= { .type = NLA_U32 },
+	[NFLH_ENCAP_STATUS]		= { .type = NLA_U32 },
+	[NFLH_ENCAP_SEQ]		= { .type = NLA_U64 },
+	[NFLH_ENCAP_ATTR]		= { .type = NLA_NESTED },
 };
 
 static int encap_msg_handler(struct cb_priv *priv, struct nlattr *attr)
 {
 	int err;
-	struct nlattr *attrs[NET_FLOW_HAIRPIN_ENCAP_MAX+1];
+	struct nlattr *attrs[NFLH_ENCAP_MAX+1];
 	uint32_t cmd, type;
 	uint64_t seq;
 
@@ -327,40 +280,40 @@ static int encap_msg_handler(struct cb_priv *priv, struct nlattr *attr)
 		return NL_SKIP;
 	}
 
-	err = nla_parse_nested(attrs, NET_FLOW_HAIRPIN_ENCAP_MAX,
+	err = nla_parse_nested(attrs, NFLH_ENCAP_MAX,
 			       attr, net_flow_hairpin_encap_policy);
 	if (err) {
 		fthp_log_warn("could not parse encap attributes\n");
 		return NL_SKIP;
 	}
 
-	if (!attrs[NET_FLOW_HAIRPIN_ENCAP_CMD_TYPE] ||
-	    !attrs[NET_FLOW_HAIRPIN_ENCAP_CMD] ||
-	    !attrs[NET_FLOW_HAIRPIN_ENCAP_SEQ] ||
-	    !attrs[NET_FLOW_HAIRPIN_ENCAP_ATTR]) {
+	if (!attrs[NFLH_ENCAP_CMD_TYPE] ||
+	    !attrs[NFLH_ENCAP_CMD] ||
+	    !attrs[NFLH_ENCAP_SEQ] ||
+	    !attrs[NFLH_ENCAP_ATTR]) {
 		fthp_log_warn("missing encap attributes\n");
 		return NL_SKIP;
 	}
 
-	type = nla_get_u32(attrs[NET_FLOW_HAIRPIN_ENCAP_CMD_TYPE]);
-	cmd = nla_get_u32(attrs[NET_FLOW_HAIRPIN_ENCAP_CMD]);
-	seq = nla_get_u64(attrs[NET_FLOW_HAIRPIN_ENCAP_SEQ]);
+	type = nla_get_u32(attrs[NFLH_ENCAP_CMD_TYPE]);
+	cmd = nla_get_u32(attrs[NFLH_ENCAP_CMD]);
+	seq = nla_get_u64(attrs[NFLH_ENCAP_SEQ]);
 
-	if (type != NET_FLOW_HAIRPIN_ENCAP_CMD_NET_FLOW_CMD) {
+	if (type != NFLH_ENCAP_CMD_NFL_CMD) {
 		net_flow_send_async_error(priv, cmd, seq,
-					  NET_FLOW_HAIRPIN_ENCAP_STATUS_EOPNOTSUPP);
+					  NFLH_ENCAP_STATUS_EOPNOTSUPP);
 		fthp_log_warn("unknown encap cmd type (%d) in message\n", type);
 		return NL_SKIP;
 	}
 
 	return net_flow_msg_handler(priv, cmd, seq,
-				    attrs[NET_FLOW_HAIRPIN_ENCAP_ATTR]);
+				    attrs[NFLH_ENCAP_ATTR]);
 }
 
-static struct nla_policy net_flow_hairpin_policy[NET_FLOW_HAIRPIN_MAX+1] =
+static struct nla_policy net_flow_hairpin_policy[NFLH_MAX+1] =
 {
-	[NET_FLOW_HAIRPIN_ENCAP]	= { .type = NLA_NESTED },
-	[NET_FLOW_HAIRPIN_LISTENER]	= { .type = NLA_NESTED },
+	[NFLH_ENCAP]	= { .type = NLA_NESTED },
+	[NFLH_LISTENER]	= { .type = NLA_NESTED },
 };
 
 static int
@@ -369,9 +322,9 @@ sync_handler(struct nl_msg *msg, void *UNUSED(arg))
 	int err;
 	struct nlmsghdr *hdr = nlmsg_hdr(msg);
 	struct genlmsghdr *gehdr = genlmsg_hdr(hdr);
-	struct nlattr *attrs[NET_FLOW_HAIRPIN_MAX+1];
+	struct nlattr *attrs[NFLH_MAX+1];
 
-	err = genlmsg_parse(hdr, 0, attrs, NET_FLOW_HAIRPIN_MAX,
+	err = genlmsg_parse(hdr, 0, attrs, NFLH_MAX,
 			    net_flow_hairpin_policy);
 	if (err) {
 		fthp_log_warn("could not parse top level attributes\n");
@@ -379,16 +332,16 @@ sync_handler(struct nl_msg *msg, void *UNUSED(arg))
 	}
 
 	switch (gehdr->cmd) {
-	case NET_FLOW_HAIRPIN_CMD_SET_LISTENER:
-		fthp_log_warn("spurious NET_FLOW_HAIRPIN_CMD_SET_LISTENER "
+	case NFLH_CMD_SET_LISTENER:
+		fthp_log_warn("spurious NFLH_CMD_SET_LISTENER "
 			     "message\n");
 		break;
 
-	case NET_FLOW_HAIRPIN_CMD_GET_LISTENER:
-		return listener_msg_handler(attrs[NET_FLOW_HAIRPIN_LISTENER]);
+	case NFLH_CMD_GET_LISTENER:
+		return listener_msg_handler(attrs[NFLH_LISTENER]);
 
-	case NET_FLOW_HAIRPIN_CMD_ENCAP:
-		fthp_log_warn("spurious NET_FLOW_HAIRPIN_CMD_ENCAP message\n");
+	case NFLH_CMD_ENCAP:
+		fthp_log_warn("spurious NFLH_CMD_ENCAP message\n");
 		break;
 
 	default:
@@ -406,9 +359,9 @@ async_handler(struct nl_msg *msg, void *arg)
 	struct cb_priv *priv = arg;
 	struct nlmsghdr *hdr = nlmsg_hdr(msg);
 	struct genlmsghdr *gehdr = genlmsg_hdr(hdr);
-	struct nlattr *attrs[NET_FLOW_HAIRPIN_MAX+1];
+	struct nlattr *attrs[NFLH_MAX+1];
 
-	err = genlmsg_parse(hdr, 0, attrs, NET_FLOW_HAIRPIN_MAX,
+	err = genlmsg_parse(hdr, 0, attrs, NFLH_MAX,
 			    net_flow_hairpin_policy);
 	if (err) {
 		fthp_log_warn("could not parse top level attributes\n");
@@ -416,18 +369,16 @@ async_handler(struct nl_msg *msg, void *arg)
 	}
 
 	switch (gehdr->cmd) {
-	case NET_FLOW_HAIRPIN_CMD_SET_LISTENER:
-		fthp_log_warn("spurious NET_FLOW_HAIRPIN_CMD_SET_LISTENER "
-			     "message\n");
+	case NFLH_CMD_SET_LISTENER:
+		fthp_log_warn("spurious NFLH_CMD_SET_LISTENER message\n");
 		break;
 
-	case NET_FLOW_HAIRPIN_CMD_GET_LISTENER:
-		fthp_log_warn("spurious NET_FLOW_HAIRPIN_CMD_GET_LISTENER "
-			     "message\n");
+	case NFLH_CMD_GET_LISTENER:
+		fthp_log_warn("spurious NFLH_CMD_GET_LISTENER message\n");
 		break;
 
-	case NET_FLOW_HAIRPIN_CMD_ENCAP:
-		return encap_msg_handler(priv, attrs[NET_FLOW_HAIRPIN_ENCAP]);
+	case NFLH_CMD_ENCAP:
+		return encap_msg_handler(priv, attrs[NFLH_ENCAP]);
 		break;
 
 	default:
@@ -469,10 +420,10 @@ main(int argc, char **UNUSED(argv))
 		fthp_log_fatal("could not connect to netlink socket: %s\n",
 				nl_geterror(err));
 
-	family = genl_ctrl_resolve(sync_sock, NET_FLOW_HAIRPIN_GENL_NAME);
+	family = genl_ctrl_resolve(sync_sock, NFLH_GENL_NAME);
 	if (family < 0)
 		fthp_log_fatal("error resolving generic netlink family \""
-				NET_FLOW_HAIRPIN_GENL_NAME "\": %s\n",
+				NFLH_GENL_NAME "\": %s\n",
 				     nl_geterror(family));
 
 	priv.family = family;

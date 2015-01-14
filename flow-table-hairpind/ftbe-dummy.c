@@ -11,29 +11,29 @@
 #include "flow-table-hairpind/list.h"
 #include "flow-table-hairpind/log.h"
 
-struct ftbe_dummy_flow {
+struct ftbe_dummy_rule {
 	struct list_head list;
-	struct net_flow_flow flow;
+	struct net_flow_rule rule;
 };
 
-/* A list will be very inefficient for large numbers of flows
+/* A list will be very inefficient for large numbers of rules
  * but it seems sufficient for prototyping a dummy backend.
  */
-static LIST_HEAD(ftbe_flows);
+static LIST_HEAD(ftbe_rules);
 
 static int
 ftbe_dummy_get_flows(int table, int min_prio, int max_prio,
-		     int (*cb)(const struct net_flow_flow *flow, void *data),
+		     int (*cb)(const struct net_flow_rule *rule, void *data),
 		     void *cb_data)
 {
-	struct ftbe_dummy_flow *flow, *tmp;
+	struct ftbe_dummy_rule *rule, *tmp;
 
-	list_for_each_entry_safe(flow, tmp, &ftbe_flows, list) {
-		if (table != flow->flow.table_id ||
-		    (min_prio >= 0 && flow->flow.priority < min_prio) ||
-		    (max_prio >= 0 && flow->flow.priority > max_prio))
+	list_for_each_entry_safe(rule, tmp, &ftbe_rules, list) {
+		if (table != rule->rule.table_id ||
+		    (min_prio >= 0 && rule->rule.priority < min_prio) ||
+		    (max_prio >= 0 && rule->rule.priority > max_prio))
 			continue;
-		if (cb(&flow->flow, cb_data))
+		if (cb(&rule->rule, cb_data))
 			return -1;
 	}
 
@@ -41,62 +41,62 @@ ftbe_dummy_get_flows(int table, int min_prio, int max_prio,
 }
 
 static int
-ftbe_dummy_set_flow(const struct net_flow_flow *flow)
+ftbe_dummy_set_flow(const struct net_flow_rule *rule)
 {
-	struct ftbe_dummy_flow *f;
+	struct ftbe_dummy_rule *r;
 
 	/* XXX Verify table, header, match, actions, etc... are valid. */
 
-	/* Return an error for a duplicate flow */
-	list_for_each_entry(f, &ftbe_flows, list) {
-		if (f->flow.table_id != flow->table_id)
+	/* Return an error for a duplicate rule */
+	list_for_each_entry(r, &ftbe_rules, list) {
+		if (r->rule.table_id != rule->table_id)
 			continue;
-		if (f->flow.uid == flow->uid) {
-			fthp_log_warn("Rejecting flow with duplicate uid\n");
+		if (r->rule.uid == rule->uid) {
+			fthp_log_warn("Rejecting rule with duplicate uid\n");
 			return -1;;
 		}
-		if (flow_table_field_refs_are_subset(f->flow.matches,
-						     flow->matches)) {
-			fthp_log_warn("Rejecting flow with duplicate match\n");
+		if (flow_table_field_refs_are_subset(r->rule.matches,
+						     rule->matches)) {
+			fthp_log_warn("Rejecting rule with duplicate match\n");
 			return -1;;
 		}
 	}
 
-	f = malloc(sizeof *f);
-	if (!f)
+	r = malloc(sizeof *r);
+	if (!r)
 		return -1;
 
-	if (flow_table_flow_clone_data(&f->flow, flow)) {
-		free(f);
+	if (flow_table_rule_clone_data(&r->rule, rule)) {
+		free(r);
 		return -1;
 	}
 
-	INIT_LIST_HEAD(&f->list);
-	list_add(&f->list, &ftbe_flows);
+	INIT_LIST_HEAD(&r->list);
+	list_add(&r->list, &ftbe_rules);
 
 	return 0;
 }
 
 static void
-__ftbe_dummy_del_flow(struct ftbe_dummy_flow *flow)
+__ftbe_dummy_del_rule(struct ftbe_dummy_rule *rule)
 {
-	list_del(&flow->list);
-	flow_table_free_actions(flow->flow.actions);
-	free(flow->flow.matches);
-	free(flow);
+	list_del(&rule->list);
+	flow_table_free_actions(rule->rule.actions);
+	free(rule->rule.matches);
+	free(rule);
 }
 
-static int ftbe_dummy_del_flow(const struct net_flow_flow *flow)
+static int ftbe_dummy_del_flow(const struct net_flow_rule *rule)
 {
-	struct ftbe_dummy_flow *f, *tmp;
+	struct ftbe_dummy_rule *r, *tmp;
 
-	list_for_each_entry_safe(f, tmp, &ftbe_flows, list) {
-		if (f->flow.table_id != flow->table_id)
+	list_for_each_entry_safe(r, tmp, &ftbe_rules, list) {
+		if (r->rule.table_id != rule->table_id)
 			continue;
-		if (!flow_table_field_refs_are_subset(f->flow.matches,
-						      flow->matches))
+		if (!flow_table_field_refs_are_subset(r->rule.matches,
+						      rule->matches))
 			continue;
-		__ftbe_dummy_del_flow(f);
+		__ftbe_dummy_del_rule(r);
 	}
 
 	return 0;
@@ -104,10 +104,10 @@ static int ftbe_dummy_del_flow(const struct net_flow_flow *flow)
 
 static void ftbe_dummy_destroy(void)
 {
-	struct ftbe_dummy_flow *f, *tmp;
+	struct ftbe_dummy_rule *f, *tmp;
 
-	list_for_each_entry_safe(f, tmp, &ftbe_flows, list)
-		__ftbe_dummy_del_flow(f);
+	list_for_each_entry_safe(f, tmp, &ftbe_rules, list)
+		__ftbe_dummy_del_rule(f);
 }
 
 static const struct ftbe_class ftbe_dummy = {

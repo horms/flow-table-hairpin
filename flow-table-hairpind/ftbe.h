@@ -17,11 +17,11 @@ struct ftbe_class {
 	void (*destroy)(void);
 
 	int (*get_flows)(int table, int min_prio, int max_prio,
-			 int (*cb)(const struct net_flow_flow *flow,
+			 int (*cb)(const struct net_flow_rule *rule,
 				   void *data),
 			 void *cb_data);
-	int (*set_flow)(const struct net_flow_flow *flow);
-	int (*del_flow)(const struct net_flow_flow *flow);
+	int (*set_flow)(const struct net_flow_rule *rule);
+	int (*del_flow)(const struct net_flow_rule *rule);
 };
 
 static inline int
@@ -43,28 +43,28 @@ ftbe_destroy(void)
 
 static inline int
 ftbe_get_flows(int table, int min_prio, int max_prio,
-	       int (*cb)(const struct net_flow_flow *flow, void *data),
+	       int (*cb)(const struct net_flow_rule *rule, void *data),
 	       void *cb_data)
 {
-	if (!ftbe || !ftbe->get_flows || !cb)
-		return -1;
-	return ftbe->get_flows(table, min_prio, max_prio, cb, cb_data);
+       if (!ftbe || !ftbe->get_flows || !cb)
+               return -1;
+       return ftbe->get_flows(table, min_prio, max_prio, cb, cb_data);
 }
 
 static inline int
-ftbe_set_flow(const struct net_flow_flow *flow)
+ftbe_set_flow(const struct net_flow_rule *rule)
 {
 	if (!ftbe || !ftbe->set_flow)
 		return -1;
-	return ftbe->set_flow(flow);
+	return ftbe->set_flow(rule);
 }
 
 static inline int
-ftbe_del_flow(const struct net_flow_flow *flow)
+ftbe_del_flow(const struct net_flow_rule *rule)
 {
 	if (!ftbe || !ftbe->del_flow)
 		return -1;
-	return ftbe->del_flow(flow);
+	return ftbe->del_flow(rule);
 }
 
 static inline int
