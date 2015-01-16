@@ -52,12 +52,17 @@ ftbe_dummy_set_flow(const struct net_flow_rule *rule)
 		if (r->rule.table_id != rule->table_id)
 			continue;
 		if (r->rule.uid == rule->uid) {
-			fthp_log_warn("Rejecting rule with duplicate uid\n");
+			fthp_log_warn("Rejecting rule for table %d with "
+				      "duplicate uid %d\n", rule->table_id,
+				      rule->uid);
 			return -1;;
 		}
 		if (flow_table_field_refs_are_subset(r->rule.matches,
 						     rule->matches)) {
-			fthp_log_warn("Rejecting rule with duplicate match\n");
+			fthp_log_warn("Rejecting rule for table %d with "
+				      "duplicate match. New rule's uid is %d. "
+				      "Existing rule's uid is %d\n",
+				      rule->table_id, rule->uid, r->rule.uid);
 			return -1;;
 		}
 	}
