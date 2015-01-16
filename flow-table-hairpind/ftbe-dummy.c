@@ -79,6 +79,9 @@ ftbe_dummy_set_flow(const struct net_flow_rule *rule)
 	INIT_LIST_HEAD(&r->list);
 	list_add(&r->list, &ftbe_rules);
 
+	fthp_log_debug("Added rule to table %d with uid %d\n",
+		       rule->table_id, rule->uid);
+
 	return 0;
 }
 
