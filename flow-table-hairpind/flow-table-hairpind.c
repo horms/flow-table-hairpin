@@ -2,6 +2,7 @@
 #include <sys/select.h>
 
 #include <errno.h>
+#include <getopt.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,6 +19,8 @@
 #include <linux/if_flow.h>
 #include <linux/if_flow_hairpin.h>
 
+#include <flow-table/json.h>
+
 #include "flow-table-hairpind/ftbe.h"
 #include "flow-table-hairpind/ftbe-dummy.h"
 #include "flow-table-hairpind/log.h"
@@ -28,16 +31,86 @@
 
 #define MAX(a, b) (a > b ? a : b)
 
+struct config {
+	struct json_object *tables;
+};
+
 struct cb_priv {
 	struct nl_sock *sock;
 	int family;
+	struct config config;
 };
 
 static void
 usage(void)
 {
-	fprintf(stderr, "Usage: " PROG_NAME "\n");
+	fprintf(stderr, "Usage: " PROG_NAME " --tables FILENAME\n");
 	exit(EXIT_FAILURE);
+}
+
+static json_object *
+load_tables(const char *filename)
+{
+	struct json_object *jobj;
+
+	jobj = json_object_from_file(filename);
+	if (!jobj)
+		fthp_log_fatal("error parsing tables from file \'%s\'\n",
+			       filename);
+
+	if (!flow_table_json_check_type(jobj, "tables"))
+		fthp_log_fatal("error tables loaded from \'%s\' "
+			       "do not appear to be tables\n", filename);
+
+	return jobj;
+}
+
+static void
+parse_cmdline(int argc, char * const *argv, struct config *config)
+{
+	memset (config, 0, sizeof *config);
+
+	while (1) {
+		int c, option_index = 0;
+
+		static const struct option long_options[] = {
+			{"tables",	required_argument,	0, 0 },
+			{0,         	0,			0, 0 }
+		};
+
+		c = getopt_long(argc, argv, "", long_options, &option_index);
+		if (c == -1)
+			break;
+
+		switch (c) {
+		case 0:
+			switch (option_index) {
+			case 0:
+				if (config->tables) {
+					fthp_log_err("Duplicate command line "
+						     "argument --tables\n");
+					usage();
+				}
+				config->tables = load_tables(optarg);
+				break;
+			default:
+				BUG();
+			}
+			break;
+		case '?':
+			usage();
+		default:
+			BUG();
+		}
+	}
+
+	if (!config->tables) {
+		fthp_log_err("Missing --tables command line argument\n");
+		usage();
+	}
+
+
+	return;
 }
 
 static void
@@ -230,6 +303,45 @@ static int net_flow_del_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 				   NFL_TABLE_CMD_SET_FLOWS, NULL, NULL);
 }
 
+static int get_tables_cb(struct nl_msg *msg, void *data)
+{
+	json_object *tables = data;
+
+	if (flow_table_json_to_nla(msg, tables)) {
+		fthp_log_warn("error putting tables\n");
+		return -1;
+	}
+
+	return 0;
+}
+
+static int net_flow_get_tables_msg_handler(struct cb_priv *priv, uint64_t seq,
+					   struct nlattr *attr)
+{
+	int ifindex;
+        int err;
+        struct nl_msg *msg;
+
+	ifindex = flow_table_get_ifindex_from_request(attr);
+	if (ifindex < 0) {
+		fthp_log_warn("could not get 'del flows' request\n");
+		return NL_SKIP;
+	}
+
+        msg = fthp_put_msg_encap(priv->family, seq, ifindex,
+                                 NFL_TABLE_CMD_GET_TABLES, get_tables_cb,
+				 priv->config.tables);
+	if (!msg)
+		 fthp_log_fatal("error putting get tables reply message\n");
+
+	err = nl_send_auto(priv->sock, msg);
+	if (err < 0)
+		 fthp_log_fatal("error sending set listener message: %s\n",
+				 nl_geterror(err));
+
+	return 0;
+}
+
 static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 				uint64_t seq, struct nlattr *attr)
 {
@@ -243,6 +355,10 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 
 	case NFL_TABLE_CMD_DEL_FLOWS:
 		err = net_flow_del_flows_msg_handler(priv, seq, attr);
+		break;
+
+	case NFL_TABLE_CMD_GET_TABLES:
+		err = net_flow_get_tables_msg_handler(priv, seq, attr);
 		break;
 
 	default:
@@ -390,15 +506,14 @@ async_handler(struct nl_msg *msg, void *arg)
 }
 
 int
-main(int argc, char **UNUSED(argv))
+main(int argc, char **argv)
 {
 	int err, family;
 	struct cb_priv priv;
 	struct nl_sock *sync_sock = NULL;
 	struct nl_sock *async_sock = NULL;
 
-	if (argc != 1)
-		usage();
+	parse_cmdline(argc, argv, &priv.config);
 
 	if (ftbe_dummy_register())
 		fthp_log_fatal("could not register dummy flow table "
