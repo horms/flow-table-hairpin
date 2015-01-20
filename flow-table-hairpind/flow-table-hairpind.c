@@ -33,6 +33,7 @@
 
 struct config {
 	struct json_object *tables;
+	struct json_object *headers;
 };
 
 struct cb_priv {
@@ -44,24 +45,32 @@ struct cb_priv {
 static void
 usage(void)
 {
-	fprintf(stderr, "Usage: " PROG_NAME " --tables FILENAME\n");
+	fprintf(stderr,
+		"Usage: " PROG_NAME " options\n"
+		"\n"
+		"options:\n"
+		"  --tables FILENAME   (required)\n"
+		"  --headers FILENAME  (required)\n");
 	exit(EXIT_FAILURE);
 }
 
 static json_object *
-load_tables(const char *filename)
+load_json(const char *filename, const char *type)
 {
 	struct json_object *jobj;
 
 	jobj = json_object_from_file(filename);
 	if (!jobj)
-		fthp_log_fatal("error parsing tables from file \'%s\'\n",
-			       filename);
+		fthp_log_fatal("error parsing %s from file \'%s\'\n",
+			       type, filename);
 
-	if (!flow_table_json_check_type(jobj, "tables"))
-		fthp_log_fatal("error tables loaded from \'%s\' "
-			       "do not appear to be tables\n", filename);
+	if (!flow_table_json_check_type(jobj, type))
+		fthp_log_fatal("error %s loaded from \'%s\' "
+			       "do not appear to be %s\n",
+			       type, filename, type);
 
+	printf("%s\n%s\n", type,
+	       json_object_to_json_string_ext(jobj, JSON_C_TO_STRING_PRETTY));
 	return jobj;
 }
 
@@ -75,6 +84,7 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 
 		static const struct option long_options[] = {
 			{"tables",	required_argument,	0, 0 },
+			{"headers",	required_argument,	0, 0 },
 			{0,         	0,			0, 0 }
 		};
 
@@ -91,7 +101,15 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 						     "argument --tables\n");
 					usage();
 				}
-				config->tables = load_tables(optarg);
+				config->tables = load_json(optarg, "tables");
+				break;
+			case 1:
+				if (config->headers) {
+					fthp_log_err("Duplicate command line "
+						     "argument --headers\n");
+					usage();
+				}
+				config->headers = load_json(optarg, "headers");
 				break;
 			default:
 				BUG();
@@ -108,7 +126,10 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 		fthp_log_err("Missing --tables command line argument\n");
 		usage();
 	}
-
+	if (!config->headers) {
+		fthp_log_err("Missing --headers command line argument\n");
+		usage();
+	}
 
 	return;
 }
@@ -207,6 +228,30 @@ static int listener_msg_handler(struct nlattr *attr)
 	return NL_OK;
 }
 
+static const char *encap_cmd_name(uint32_t cmd)
+{
+	switch (cmd) {
+	case NFL_TABLE_CMD_GET_TABLES:
+		return "get tables";
+	case NFL_TABLE_CMD_GET_HEADERS:
+		return "get headers";
+	case NFL_TABLE_CMD_GET_ACTIONS:
+		return "get actions";
+	case NFL_TABLE_CMD_GET_HDR_GRAPH:
+		return "get header graph";
+	case NFL_TABLE_CMD_GET_TABLE_GRAPH:
+		return "get table graph";
+	case NFL_TABLE_CMD_GET_FLOWS:
+		return "get flows";
+	case NFL_TABLE_CMD_SET_FLOWS:
+		return "set flows";
+	case NFL_TABLE_CMD_DEL_FLOWS:
+		return "del flows";
+	default:
+		BUG();
+	}
+}
+
 static int net_flow_send_async_error(struct cb_priv *priv, uint32_t encap_cmd,
 				     uint64_t seq, uint32_t status)
 {
@@ -303,11 +348,11 @@ static int net_flow_del_flows_msg_handler(struct cb_priv *priv, uint64_t seq,
 				   NFL_TABLE_CMD_SET_FLOWS, NULL, NULL);
 }
 
-static int get_tables_cb(struct nl_msg *msg, void *data)
+static int discovery_cb(struct nl_msg *msg, void *data)
 {
-	json_object *tables = data;
+	json_object *json = data;
 
-	if (flow_table_json_to_nla(msg, tables)) {
+	if (flow_table_json_to_nla(msg, json)) {
 		fthp_log_warn("error putting tables\n");
 		return -1;
 	}
@@ -315,8 +360,9 @@ static int get_tables_cb(struct nl_msg *msg, void *data)
 	return 0;
 }
 
-static int net_flow_get_tables_msg_handler(struct cb_priv *priv, uint64_t seq,
-					   struct nlattr *attr)
+static int discovery_handler(struct cb_priv *priv, uint64_t seq,
+			     uint32_t cmd, struct nlattr *attr,
+			     json_object *data)
 {
 	int ifindex;
         int err;
@@ -324,20 +370,21 @@ static int net_flow_get_tables_msg_handler(struct cb_priv *priv, uint64_t seq,
 
 	ifindex = flow_table_get_ifindex_from_request(attr);
 	if (ifindex < 0) {
-		fthp_log_warn("could not get 'del flows' request\n");
+		fthp_log_warn("could not get '%s' request\n",
+			      encap_cmd_name(cmd));
 		return NL_SKIP;
 	}
 
-        msg = fthp_put_msg_encap(priv->family, seq, ifindex,
-                                 NFL_TABLE_CMD_GET_TABLES, get_tables_cb,
-				 priv->config.tables);
+        msg = fthp_put_msg_encap(priv->family, seq, ifindex, cmd,
+				 discovery_cb, data);
 	if (!msg)
-		 fthp_log_fatal("error putting get tables reply message\n");
+		 fthp_log_fatal("error putting '%s' reply message\n",
+				encap_cmd_name(cmd));
 
 	err = nl_send_auto(priv->sock, msg);
 	if (err < 0)
-		 fthp_log_fatal("error sending set listener message: %s\n",
-				 nl_geterror(err));
+		 fthp_log_fatal("error sending '%s' reply: %s\n",
+				encap_cmd_name(cmd), nl_geterror(err));
 
 	return 0;
 }
@@ -358,7 +405,13 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 		break;
 
 	case NFL_TABLE_CMD_GET_TABLES:
-		err = net_flow_get_tables_msg_handler(priv, seq, attr);
+		err = discovery_handler(priv, seq, NFL_TABLE_CMD_GET_TABLES,
+					attr, priv->config.tables);
+		break;
+
+	case NFL_TABLE_CMD_GET_HEADERS:
+		err = discovery_handler(priv, seq, NFL_TABLE_CMD_GET_HEADERS,
+					attr, priv->config.headers);
 		break;
 
 	default:
