@@ -34,6 +34,7 @@
 struct config {
 	struct json_object *tables;
 	struct json_object *headers;
+	struct json_object *actions;
 };
 
 struct cb_priv {
@@ -50,7 +51,8 @@ usage(void)
 		"\n"
 		"options:\n"
 		"  --tables FILENAME   (required)\n"
-		"  --headers FILENAME  (required)\n");
+		"  --headers FILENAME  (required)\n"
+		"  --actions FILENAME  (required)\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -85,6 +87,7 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 		static const struct option long_options[] = {
 			{"tables",	required_argument,	0, 0 },
 			{"headers",	required_argument,	0, 0 },
+			{"actions",	required_argument,	0, 0 },
 			{0,         	0,			0, 0 }
 		};
 
@@ -111,6 +114,14 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 				}
 				config->headers = load_json(optarg, "headers");
 				break;
+			case 2:
+				if (config->actions) {
+					fthp_log_err("Duplicate command line "
+						     "argument --actions\n");
+					usage();
+				}
+				config->actions = load_json(optarg, "actions");
+				break;
 			default:
 				BUG();
 			}
@@ -128,6 +139,10 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 	}
 	if (!config->headers) {
 		fthp_log_err("Missing --headers command line argument\n");
+		usage();
+	}
+	if (!config->actions) {
+		fthp_log_err("Missing --actions command line argument\n");
 		usage();
 	}
 
@@ -412,6 +427,11 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 	case NFL_TABLE_CMD_GET_HEADERS:
 		err = discovery_handler(priv, seq, NFL_TABLE_CMD_GET_HEADERS,
 					attr, priv->config.headers);
+		break;
+
+	case NFL_TABLE_CMD_GET_ACTIONS:
+		err = discovery_handler(priv, seq, NFL_TABLE_CMD_GET_ACTIONS,
+					attr, priv->config.actions);
 		break;
 
 	default:
