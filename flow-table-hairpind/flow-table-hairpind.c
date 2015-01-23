@@ -36,6 +36,7 @@ struct config {
 	struct json_object *headers;
 	struct json_object *actions;
 	struct json_object *header_graph;
+	struct json_object *table_graph;
 };
 
 struct cb_priv {
@@ -54,7 +55,8 @@ usage(void)
 		"  --tables FILENAME   (required)\n"
 		"  --headers FILENAME  (required)\n"
 		"  --actions FILENAME  (required)\n"
-		"  --header-graph FILENAME  (required)\n");
+		"  --header-graph FILENAME  (required)\n"
+		"  --table-graph FILENAME  (required)\n");
 	exit(EXIT_FAILURE);
 }
 
@@ -91,6 +93,7 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 			{"headers",	required_argument,	0, 0 },
 			{"actions",	required_argument,	0, 0 },
 			{"header-graph", required_argument,	0, 0 },
+			{"table-graph", required_argument,	0, 0 },
 			{0,         	0,			0, 0 }
 		};
 
@@ -133,6 +136,14 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 				}
 				config->header_graph = load_json(optarg, "header_graph");
 				break;
+			case 4:
+				if (config->table_graph) {
+					fthp_log_err("Duplicate command line "
+						     "argument --table-graph\n");
+					usage();
+				}
+				config->table_graph = load_json(optarg, "table_graph");
+				break;
 			default:
 				BUG();
 			}
@@ -158,6 +169,10 @@ parse_cmdline(int argc, char * const *argv, struct config *config)
 	}
 	if (!config->header_graph) {
 		fthp_log_err("Missing --header-graph command line argument\n");
+		usage();
+	}
+	if (!config->table_graph) {
+		fthp_log_err("Missing --table-graph command line argument\n");
 		usage();
 	}
 
@@ -452,6 +467,11 @@ static int net_flow_msg_handler(struct cb_priv *priv, uint32_t cmd,
 	case NFL_TABLE_CMD_GET_HDR_GRAPH:
 		err = discovery_handler(priv, seq, NFL_TABLE_CMD_GET_HDR_GRAPH,
 					attr, priv->config.header_graph);
+		break;
+
+	case NFL_TABLE_CMD_GET_TABLE_GRAPH:
+		err = discovery_handler(priv, seq, NFL_TABLE_CMD_GET_TABLE_GRAPH,
+					attr, priv->config.table_graph);
 		break;
 
 	default:
